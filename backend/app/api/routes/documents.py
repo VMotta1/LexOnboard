@@ -66,12 +66,22 @@ async def upload_document(
             detail=f"Unsupported file type '{suffix}'. Only PDF and DOCX are accepted.",
         )
 
-    # Validate doc_type
-    valid_doc_types = {"master_agreement", "compliance", "nda", "sow", "other"}
-    if doc_type not in valid_doc_types:
+    # Normalize doc_type (accept display names or slugs from frontend)
+    _DOC_TYPE_MAP = {
+        "master agreement": "master_agreement",
+        "master_agreement": "master_agreement",
+        "compliance document": "compliance",
+        "compliance": "compliance",
+        "nda": "nda",
+        "statement of work": "sow",
+        "sow": "sow",
+        "other": "other",
+    }
+    doc_type = _DOC_TYPE_MAP.get(doc_type.lower(), "")
+    if not doc_type:
         raise HTTPException(
             status_code=400,
-            detail=f"Invalid doc_type. Must be one of: {sorted(valid_doc_types)}",
+            detail="Invalid doc_type. Accepted: Master Agreement, Compliance Document, NDA, Statement of Work, Other",
         )
 
     # Read content and enforce size limit
@@ -110,25 +120,45 @@ async def upload_document(
         db.commit()
         db.refresh(doc)
 
-        from app.tasks.process_document import process_document
+        from app.config import settings as _settings
+        if _settings.DEMO_MODE:
+            # In demo mode: skip real Celery pipeline, mark document complete immediately
+            mock_job_id = f"demo-{doc_id}"
+            doc.status = "complete"
+            doc.job_id = mock_job_id
+            db.commit()
+            r = _redis()
+            r.setex(
+                f"job:{mock_job_id}",
+                _REDIS_JOB_TTL,
+                json.dumps({
+                    "stage": "complete",
+                    "progress_pct": 100,
+                    "document_id": str(doc_id),
+                    "org_id": org_id,
+                    "error": None,
+                    "updated_at": datetime.now(timezone.utc).isoformat(),
+                }),
+            )
+        else:
+            from app.tasks.process_document import process_document
+            task = process_document.delay(str(doc_id))
 
-        task = process_document.delay(str(doc_id))
+            # Store initial job state in Redis
+            r = _redis()
+            state = {
+                "stage": "queued",
+                "progress_pct": 0,
+                "document_id": str(doc_id),
+                "org_id": org_id,
+                "error": None,
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            }
+            r.setex(f"job:{task.id}", _REDIS_JOB_TTL, json.dumps(state))
 
-        # Store initial job state in Redis
-        r = _redis()
-        state = {
-            "stage": "queued",
-            "progress_pct": 0,
-            "document_id": str(doc_id),
-            "org_id": org_id,
-            "error": None,
-            "updated_at": datetime.now(timezone.utc).isoformat(),
-        }
-        r.setex(f"job:{task.id}", _REDIS_JOB_TTL, json.dumps(state))
-
-        # Persist task id back onto Document
-        doc.job_id = task.id
-        db.commit()
+            # Persist task id back onto Document
+            doc.job_id = task.id
+            db.commit()
 
         return DocumentUploadResponse(
             id=str(doc.id),

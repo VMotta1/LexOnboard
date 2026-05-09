@@ -3,6 +3,7 @@ import logging
 import uuid
 from datetime import datetime, timezone
 
+from app.api.cache import cache_delete_pattern, playbook_cache_key, textbook_cache_key, checklist_cache_key
 from app.celery_app import celery_app
 from app.database import SessionLocal
 from app.models.clause import ProcessedClause
@@ -124,6 +125,11 @@ def regenerate_playbook(org_id: str):
             f"Playbook v{new_playbook.version} generated with {len(sections)} sections "
             f"from {doc_count} clauses for org {org_id}"
         )
+
+        # Invalidate response caches for this org
+        cache_delete_pattern(playbook_cache_key(org_id))
+        cache_delete_pattern(textbook_cache_key(org_id))
+        cache_delete_pattern(checklist_cache_key(org_id))
 
         # Enqueue onboarding generation
         from app.tasks.generate_onboarding import generate_onboarding

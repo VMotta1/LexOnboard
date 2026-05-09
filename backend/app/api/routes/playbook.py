@@ -9,6 +9,14 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse
 from sqlalchemy.orm.attributes import flag_modified
 
+from app.api.cache import (
+    cache_delete_pattern,
+    cache_get,
+    cache_set,
+    checklist_cache_key,
+    playbook_cache_key,
+    textbook_cache_key,
+)
 from app.api.deps import get_org_id
 from app.database import SessionLocal
 from app.models.document import Document
@@ -51,6 +59,11 @@ def _current_playbook(db, org_id: str):
 async def get_current_playbook(request: Request):
     # TODO: replace get_org_id with real auth when auth is implemented
     org_id = get_org_id(request)
+
+    cached = cache_get(playbook_cache_key(org_id))
+    if cached:
+        return cached
+
     db = SessionLocal()
     try:
         playbook = _current_playbook(db, org_id)
@@ -59,7 +72,9 @@ async def get_current_playbook(request: Request):
                 status_code=404,
                 detail="No playbook generated yet. Upload documents and trigger regeneration.",
             )
-        return _to_response(playbook)
+        result = _to_response(playbook)
+        cache_set(playbook_cache_key(org_id), result.model_dump())
+        return result
     finally:
         db.close()
 
