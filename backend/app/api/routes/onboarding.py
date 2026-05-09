@@ -1,9 +1,10 @@
 import logging
 import uuid
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
 from sqlalchemy.orm.attributes import flag_modified
 
+from app.api.cache import cache_get, cache_set, checklist_cache_key, textbook_cache_key
 from app.api.deps import get_org_id, get_user_context
 from app.database import SessionLocal
 from app.models.onboarding import (
@@ -41,6 +42,11 @@ def _current_playbook(db, org_id: str):
 async def get_textbook(request: Request):
     # TODO: replace get_org_id with real auth when auth is implemented
     org_id = get_org_id(request)
+
+    cached = cache_get(textbook_cache_key(org_id))
+    if cached:
+        return cached
+
     db = SessionLocal()
     try:
         playbook = _current_playbook(db, org_id)
@@ -59,12 +65,14 @@ async def get_textbook(request: Request):
                 detail="Textbook not generated yet. Regenerate the playbook to trigger generation.",
             )
 
-        return TextbookResponse(
+        result = TextbookResponse(
             id=str(textbook.id),
             chapters=textbook.chapters or [],
             page_estimate=textbook.page_estimate,
             generated_at=textbook.generated_at,
         )
+        cache_set(textbook_cache_key(org_id), result.model_dump())
+        return result
     finally:
         db.close()
 
@@ -101,6 +109,11 @@ async def get_quizzes(request: Request):
 async def get_checklist(request: Request):
     # TODO: replace get_org_id with real auth when auth is implemented
     org_id = get_org_id(request)
+
+    cached = cache_get(checklist_cache_key(org_id))
+    if cached:
+        return cached
+
     db = SessionLocal()
     try:
         playbook = _current_playbook(db, org_id)
@@ -118,10 +131,12 @@ async def get_checklist(request: Request):
                 status_code=404,
                 detail="Checklist not generated yet.",
             )
-        return ContractChecklistResponse(
+        result = ContractChecklistResponse(
             id=str(checklist.id),
             categories=checklist.categories or [],
         )
+        cache_set(checklist_cache_key(org_id), result.model_dump())
+        return result
     finally:
         db.close()
 
@@ -142,7 +157,9 @@ async def get_progress(request: Request):
 
 
 @router.patch("/progress", response_model=OnboardingProgressResponse)
-async def update_progress(request: Request, body: OnboardingProgressUpdate):
+async def update_progress(
+    request: Request, body: OnboardingProgressUpdate, background_tasks: BackgroundTasks
+):
     # TODO: replace get_org_id with real auth when auth is implemented
     ctx = get_user_context(request)
     org_id = ctx["org_id"]
@@ -152,35 +169,35 @@ async def update_progress(request: Request, body: OnboardingProgressUpdate):
     try:
         progress = _get_or_create_progress(db, user_id, org_id)
 
-        # Merge new chapters_read (union)
-        if body.chapters_read:
-            existing = set(progress.chapters_read or [])
-            existing.update(body.chapters_read)
-            progress.chapters_read = sorted(existing)
-            flag_modified(progress, "chapters_read")
+        # Compute new state in memory (immutable merge)
+        new_chapters_read = sorted(
+            set(progress.chapters_read or []) | set(body.chapters_read or [])
+        )
+        new_quiz_scores = dict(progress.quiz_scores or {})
+        new_quizzes_completed = list(progress.quizzes_completed or [])
 
-        # Update quiz score
         if body.quiz_score:
             quiz_id = body.quiz_score.quiz_id
             score = body.quiz_score.score
+            new_quiz_scores[quiz_id] = score
+            if score == 1.0 and quiz_id not in new_quizzes_completed:
+                new_quizzes_completed.append(quiz_id)
 
-            scores = dict(progress.quiz_scores or {})
-            scores[quiz_id] = score
-            progress.quiz_scores = scores
-            flag_modified(progress, "quiz_scores")
+        # Build response immediately from computed state
+        response = _build_progress_response_from_state(
+            db, org_id,
+            new_chapters_read, new_quiz_scores, new_quizzes_completed,
+            progress.checklist_uses or 0, progress.chat_queries or 0,
+        )
 
-            # Only mark as completed if 100% — mastery threshold
-            if score == 1.0:
-                completed = list(progress.quizzes_completed or [])
-                if quiz_id not in completed:
-                    completed.append(quiz_id)
-                progress.quizzes_completed = completed
-                flag_modified(progress, "quizzes_completed")
+        # Persist in background — don't block the response
+        progress_id = str(progress.id)
+        background_tasks.add_task(
+            _persist_progress_update,
+            progress_id, new_chapters_read, new_quiz_scores, new_quizzes_completed,
+        )
 
-        db.commit()
-        db.refresh(progress)
-
-        return _build_progress_response(db, org_id, progress)
+        return response
     finally:
         db.close()
 
@@ -259,3 +276,75 @@ def _build_progress_response(
         chat_queries=progress.chat_queries or 0,
         completion_percentage=round(completion_pct, 1),
     )
+
+
+def _build_progress_response_from_state(
+    db,
+    org_id: str,
+    chapters_read: list,
+    quiz_scores: dict,
+    quizzes_completed: list,
+    checklist_uses: int,
+    chat_queries: int,
+) -> OnboardingProgressResponse:
+    playbook = _current_playbook(db, org_id)
+    total_chapters = 0
+    total_quizzes = 0
+    if playbook:
+        textbook = (
+            db.query(TextbookContent)
+            .filter(TextbookContent.playbook_id == playbook.id)
+            .first()
+        )
+        if textbook:
+            total_chapters = len(textbook.chapters or [])
+        quiz_sets = (
+            db.query(QuizSet)
+            .filter(QuizSet.playbook_id == playbook.id, QuizSet.quiz_type != "final_assessment")
+            .all()
+        )
+        total_quizzes = len(quiz_sets)
+
+    quizzes_passed = sum(1 for score in quiz_scores.values() if score == 1.0)
+    textbook_pct = len(chapters_read) / total_chapters if total_chapters > 0 else 0.0
+    quiz_pct = quizzes_passed / total_quizzes if total_quizzes > 0 else 0.0
+    completion_pct = (textbook_pct * 0.5 + quiz_pct * 0.5) * 100
+
+    return OnboardingProgressResponse(
+        chapters_read=chapters_read,
+        quizzes_completed=[str(qid) for qid in quizzes_completed],
+        quiz_scores={str(k): float(v) for k, v in quiz_scores.items()},
+        checklist_uses=checklist_uses,
+        chat_queries=chat_queries,
+        completion_percentage=round(completion_pct, 1),
+    )
+
+
+def _persist_progress_update(
+    progress_id: str,
+    chapters_read: list,
+    quiz_scores: dict,
+    quizzes_completed: list,
+) -> None:
+    import uuid as _uuid
+    db = SessionLocal()
+    try:
+        progress = (
+            db.query(OnboardingProgress)
+            .filter(OnboardingProgress.id == _uuid.UUID(progress_id))
+            .first()
+        )
+        if not progress:
+            return
+        progress.chapters_read = chapters_read
+        progress.quiz_scores = quiz_scores
+        progress.quizzes_completed = quizzes_completed
+        flag_modified(progress, "chapters_read")
+        flag_modified(progress, "quiz_scores")
+        flag_modified(progress, "quizzes_completed")
+        db.commit()
+    except Exception as exc:
+        logger.warning(f"Background progress persist failed: {exc}")
+        db.rollback()
+    finally:
+        db.close()

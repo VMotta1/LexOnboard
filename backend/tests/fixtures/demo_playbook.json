@@ -1,0 +1,167 @@
+{
+  "sections": [
+    {
+      "clause_type": "indemnification",
+      "non_negotiables": [
+        "Mutual indemnification is the minimum acceptable structure — unilateral indemnification in vendor's favor is non-negotiable.",
+        "Cap on indemnification liability must mirror the overall liability cap.",
+        "IP indemnification from vendor for third-party infringement claims is always required."
+      ],
+      "standard_positions": [
+        {
+          "title": "Mutual indemnification scope",
+          "our_position": "Each party indemnifies the other for its own negligence, willful misconduct, and breach. Broad 'hold harmless' language must be limited to actual claims, not theoretical exposure.",
+          "acceptable_variations": [
+            "Carve-out for gross negligence where both parties share fault proportionally",
+            "IP indemnification handled in a separate IP clause"
+          ],
+          "rationale": "Unlimited mutual indemnification creates unquantifiable exposure. Must be scoped."
+        }
+      ],
+      "red_flags": [
+        "Unilateral indemnification obligation on Ironbridge without reciprocal protection",
+        "'Consequential damages' included in indemnification scope without cap",
+        "No carve-out for gross negligence or willful misconduct of the indemnified party"
+      ],
+      "industry_baseline": "Industry standard is mutual indemnification with carve-outs for gross negligence. Engineering sector commonly adds professional liability carve-outs.",
+      "version": 1,
+      "last_edited_at": null
+    },
+    {
+      "clause_type": "limitation_of_liability",
+      "non_negotiables": [
+        "Total liability cap must be expressed as a fixed multiple of fees paid — minimum 12 months of fees.",
+        "Consequential, indirect, and punitive damages must be mutually excluded.",
+        "Death/personal injury and fraud carve-outs from the liability cap are always accepted."
+      ],
+      "standard_positions": [
+        {
+          "title": "Liability cap multiple",
+          "our_position": "Cap at 100% of fees paid in the 12 months preceding the claim. Will negotiate to 200% for high-risk engagements.",
+          "acceptable_variations": [
+            "Higher cap for data breach scenarios (up to 200% of annual fees)",
+            "Separate cap for IP infringement claims"
+          ],
+          "rationale": "Proportionate to contract value — protects both parties from catastrophic loss."
+        }
+      ],
+      "red_flags": [
+        "Uncapped liability for any category of loss",
+        "Asymmetric cap where our exposure is higher than counterparty's",
+        "Exclusion of consequential damages waived for specific breach types without a corresponding cap"
+      ],
+      "industry_baseline": "Mutual exclusion of consequential damages and cap at 12 months of fees is standard across engineering services contracts.",
+      "version": 1,
+      "last_edited_at": null
+    },
+    {
+      "clause_type": "governing_law",
+      "non_negotiables": [
+        "Governing law must be a common law jurisdiction — no civil law jurisdictions without legal review.",
+        "New York or Delaware preferred. Ontario, England & Wales acceptable.",
+        "Exclusive jurisdiction clause must be mutual — no unilateral venue selection."
+      ],
+      "standard_positions": [
+        {
+          "title": "Preferred jurisdiction",
+          "our_position": "New York law, exclusive jurisdiction of courts in New York County.",
+          "acceptable_variations": [
+            "Delaware for US counterparties incorporated there",
+            "Ontario for Canadian counterparties",
+            "England & Wales for international agreements"
+          ],
+          "rationale": "New York has the most developed commercial contract law in common law jurisdictions."
+        }
+      ],
+      "red_flags": [
+        "Jurisdiction in a country with limited enforcement of foreign judgments",
+        "Dispute resolution requiring travel to counterparty's home jurisdiction exclusively",
+        "Arbitration clause that waives right to court proceedings for injunctive relief"
+      ],
+      "industry_baseline": "New York and Delaware are the most common governing law choices for US engineering services contracts.",
+      "version": 1,
+      "last_edited_at": null
+    },
+    {
+      "clause_type": "termination",
+      "non_negotiables": [
+        "Minimum 30-day written cure period before termination for cause.",
+        "Payment for all services rendered through termination date, regardless of which party terminates.",
+        "Survival clause must cover: indemnification, confidentiality, IP ownership, limitation of liability, and governing law."
+      ],
+      "standard_positions": [
+        {
+          "title": "Termination for convenience",
+          "our_position": "Either party may terminate for convenience on 60 days notice. Client pays for all work completed plus reasonable wind-down costs (capped at 30 days of fees).",
+          "acceptable_variations": [
+            "30-day notice for contracts under $50K total value",
+            "90-day notice for contracts over $500K"
+          ],
+          "rationale": "Long-running engineering engagements require adequate wind-down to protect both parties."
+        }
+      ],
+      "red_flags": [
+        "Client can terminate for convenience with less than 30 days notice on a long-term engagement",
+        "No payment obligation for completed work upon termination for convenience",
+        "Survival clause that does not include confidentiality or IP ownership"
+      ],
+      "industry_baseline": "30-60 day termination for convenience notice periods are standard. Survival of key provisions is universal.",
+      "version": 1,
+      "last_edited_at": null
+    },
+    {
+      "clause_type": "intellectual_property",
+      "non_negotiables": [
+        "Ironbridge retains all IP in pre-existing tools, methodologies, and frameworks (background IP).",
+        "Client owns deliverables specifically created for them (foreground IP) upon full payment.",
+        "License to background IP embedded in deliverables is limited, non-exclusive, and non-transferable."
+      ],
+      "standard_positions": [
+        {
+          "title": "Background IP license",
+          "our_position": "Client receives a perpetual, non-exclusive, non-transferable license to use background IP embedded in deliverables, solely for their internal business purposes.",
+          "acceptable_variations": [
+            "Sublicensing to affiliates permitted with prior written consent",
+            "Source code escrow for software deliverables"
+          ],
+          "rationale": "Background IP is core to our business model. Assigning it would destroy the value of our methodology."
+        }
+      ],
+      "red_flags": [
+        "Work-for-hire provisions that assign all IP including background IP to client",
+        "IP assignment without requiring full payment as a condition precedent",
+        "Broad IP license that includes the right to sublicense to competitors"
+      ],
+      "industry_baseline": "Background/foreground IP split is the engineering industry standard. Full work-for-hire is uncommon except in bespoke software development.",
+      "version": 1,
+      "last_edited_at": null
+    },
+    {
+      "clause_type": "confidentiality",
+      "non_negotiables": [
+        "Mutual confidentiality — both parties' information protected equally.",
+        "Minimum 3-year confidentiality obligation post-termination.",
+        "Standard carve-outs: publicly available information, independently developed, legally required disclosure."
+      ],
+      "standard_positions": [
+        {
+          "title": "Confidentiality term",
+          "our_position": "5 years post-termination for standard confidential information. Perpetual for trade secrets.",
+          "acceptable_variations": [
+            "3 years for non-sensitive commercial information",
+            "Perpetual only for specifically marked trade secret materials"
+          ],
+          "rationale": "Engineering methodologies have long competitive half-lives. 5 years provides adequate protection."
+        }
+      ],
+      "red_flags": [
+        "Unilateral confidentiality protecting only client's information",
+        "Confidentiality term of less than 2 years",
+        "No carve-out for legally required disclosure (court orders, regulatory requests)"
+      ],
+      "industry_baseline": "Mutual NDA with 3-5 year post-term obligation is universal in engineering services. Perpetual for trade secrets.",
+      "version": 1,
+      "last_edited_at": null
+    }
+  ]
+}
