@@ -4,7 +4,7 @@ import uuid
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
 from sqlalchemy.orm.attributes import flag_modified
 
-from app.api.cache import cache_get, cache_set, checklist_cache_key, textbook_cache_key
+from app.api.cache import cache_delete, cache_get, cache_set, checklist_cache_key, textbook_cache_key
 from app.api.deps import get_org_id, get_user_context
 from app.database import SessionLocal
 from app.models.onboarding import (
@@ -19,6 +19,8 @@ from app.schemas.onboarding import (
     OnboardingProgressResponse,
     OnboardingProgressUpdate,
     QuizSetResponse,
+    RegenerateChapterRequest,
+    RegenerateChapterResponse,
     TextbookResponse,
 )
 
@@ -73,6 +75,46 @@ async def get_textbook(request: Request):
         )
         cache_set(textbook_cache_key(org_id), result.model_dump())
         return result
+    finally:
+        db.close()
+
+
+@router.post("/textbook/regenerate-chapter", response_model=RegenerateChapterResponse)
+async def regenerate_chapter(request: Request, body: RegenerateChapterRequest):
+    from app.services.generation.textbook import regenerate_single_chapter
+
+    org_id = get_org_id(request)
+    db = SessionLocal()
+    try:
+        playbook = _current_playbook(db, org_id)
+        if not playbook:
+            raise HTTPException(status_code=404, detail="No playbook found.")
+
+        textbook = (
+            db.query(TextbookContent)
+            .filter(TextbookContent.playbook_id == playbook.id)
+            .order_by(TextbookContent.generated_at.desc())
+            .first()
+        )
+        if not textbook:
+            raise HTTPException(status_code=404, detail="Textbook not generated yet.")
+
+        try:
+            new_chapter = regenerate_single_chapter(playbook, body.chapter_number)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+
+        updated_chapters = [
+            new_chapter if ch.get("chapter_number") == body.chapter_number else ch
+            for ch in (textbook.chapters or [])
+        ]
+        textbook.chapters = updated_chapters
+        flag_modified(textbook, "chapters")
+        db.commit()
+
+        cache_delete(textbook_cache_key(org_id))
+
+        return RegenerateChapterResponse(chapter=new_chapter)
     finally:
         db.close()
 

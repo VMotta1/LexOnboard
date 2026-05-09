@@ -1,17 +1,32 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
-import { ChevronDown, ChevronRight, Save } from "lucide-react";
+import { ChevronDown, ChevronRight, RefreshCw, Save } from "lucide-react";
 import { api, contentEditorApi, ApiError } from "@/lib/api";
 import type {
-  TextbookContent,
-  TextbookChapter,
   QuizSet,
   Question,
   ContractChecklist,
   ChecklistCategory,
   ChecklistItem,
 } from "@/types";
+
+// API returns chapter_number (not chapter_index) — define locally to match wire format
+interface ApiChapter {
+  chapter_number: number;
+  title: string;
+  content: string;
+  key_takeaways: string[];
+}
+
+interface ApiTextbook {
+  id: string;
+  chapters: ApiChapter[];
+  page_estimate: number;
+  generated_at: string;
+}
+
+const GENERATION_ERROR = "_Content unavailable — generation error._";
 
 type Tab = "textbook" | "quizzes" | "final" | "checklist";
 
@@ -63,18 +78,17 @@ export default function ContentEditorPage() {
 /* ── Textbook ──────────────────────────────────────────────── */
 
 function TextbookEditor() {
-  const [textbook, setTextbook] = useState<TextbookContent | null>(null);
+  const [textbook, setTextbook] = useState<ApiTextbook | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [dirtyChapters, setDirtyChapters] = useState<Set<number>>(new Set());
   const [savingChapter, setSavingChapter] = useState<number | null>(null);
-  const [expandedChapters, setExpandedChapters] = useState<Set<number>>(
-    new Set()
-  );
+  const [regeneratingChapter, setRegeneratingChapter] = useState<number | null>(null);
+  const [expandedChapters, setExpandedChapters] = useState<Set<number>>(new Set());
 
   useEffect(() => {
     api
-      .get<TextbookContent>("/api/onboarding/textbook")
+      .get<ApiTextbook>("/api/onboarding/textbook")
       .then((data) => setTextbook(data))
       .catch((err: unknown) => {
         setError(err instanceof ApiError ? err.message : "Failed to load textbook");
@@ -82,40 +96,63 @@ function TextbookEditor() {
       .finally(() => setLoading(false));
   }, []);
 
-  function toggleChapter(index: number) {
+  function toggleChapter(num: number) {
     setExpandedChapters((prev) => {
       const next = new Set(prev);
-      if (next.has(index)) {
-        next.delete(index);
+      if (next.has(num)) {
+        next.delete(num);
       } else {
-        next.add(index);
+        next.add(num);
       }
       return next;
     });
   }
 
-  function updateChapterContent(chapterIndex: number, content: string) {
+  function updateChapterContent(chapterNumber: number, content: string) {
     if (!textbook) return;
     setTextbook({
       ...textbook,
       chapters: textbook.chapters.map((ch) =>
-        ch.chapter_index === chapterIndex ? { ...ch, content } : ch
+        ch.chapter_number === chapterNumber ? { ...ch, content } : ch
       ),
     });
-    setDirtyChapters((prev) => new Set(prev).add(chapterIndex));
+    setDirtyChapters((prev) => new Set(prev).add(chapterNumber));
   }
 
-  async function saveChapter(chapter: TextbookChapter) {
-    setSavingChapter(chapter.chapter_index);
+  async function saveChapter(chapter: ApiChapter) {
+    setSavingChapter(chapter.chapter_number);
     try {
-      await contentEditorApi.saveChapter(chapter.chapter_index, chapter.content);
+      await contentEditorApi.saveChapter(chapter.chapter_number, chapter.content);
       setDirtyChapters((prev) => {
         const next = new Set(prev);
-        next.delete(chapter.chapter_index);
+        next.delete(chapter.chapter_number);
         return next;
       });
     } finally {
       setSavingChapter(null);
+    }
+  }
+
+  async function regenerateChapter(chapterNumber: number) {
+    setRegeneratingChapter(chapterNumber);
+    try {
+      const res = await api.post<{ chapter: ApiChapter }>(
+        "/api/onboarding/textbook/regenerate-chapter",
+        { chapter_number: chapterNumber }
+      );
+      setTextbook((prev) => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          chapters: prev.chapters.map((ch) =>
+            ch.chapter_number === chapterNumber ? res.chapter : ch
+          ),
+        };
+      });
+    } catch (err) {
+      alert(err instanceof ApiError ? err.message : "Regeneration failed");
+    } finally {
+      setRegeneratingChapter(null);
     }
   }
 
@@ -126,17 +163,25 @@ function TextbookEditor() {
   return (
     <div className="space-y-3">
       {textbook.chapters.map((chapter) => {
-        const expanded = expandedChapters.has(chapter.chapter_index);
-        const dirty = dirtyChapters.has(chapter.chapter_index);
-        const saving = savingChapter === chapter.chapter_index;
+        const num = chapter.chapter_number;
+        const expanded = expandedChapters.has(num);
+        const dirty = dirtyChapters.has(num);
+        const saving = savingChapter === num;
+        const regenerating = regeneratingChapter === num;
+        const isError = chapter.content === GENERATION_ERROR;
+        // intro (0) and red flags (last) are hardcoded — only section chapters can be regenerated
+        const canRegenerate = isError && num > 0 && num < textbook.chapters.length - 1;
 
         return (
           <div
-            key={chapter.chapter_index}
-            className="bg-[#1A2540] border border-[#1E2D4A] rounded-lg overflow-hidden"
+            key={num}
+            className={[
+              "bg-[#1A2540] border rounded-lg overflow-hidden",
+              isError ? "border-red-900/50" : "border-[#1E2D4A]",
+            ].join(" ")}
           >
             <button
-              onClick={() => toggleChapter(chapter.chapter_index)}
+              onClick={() => toggleChapter(num)}
               className="w-full flex items-center gap-3 px-5 py-4 text-left hover:bg-[#131E33] transition-colors"
             >
               {expanded ? (
@@ -145,36 +190,57 @@ function TextbookEditor() {
                 <ChevronRight size={16} className="text-[#64748B] shrink-0" />
               )}
               <span className="text-xs text-[#64748B] font-semibold uppercase tracking-wider w-16 shrink-0">
-                Ch. {chapter.chapter_index + 1}
+                Ch. {num + 1}
               </span>
               <span className="flex-1 text-sm text-[#F5F3EE] font-medium">
                 {chapter.title}
               </span>
-              {dirty && (
+              {isError && (
+                <span className="text-xs text-red-400 shrink-0">generation error</span>
+              )}
+              {dirty && !isError && (
                 <span className="w-2 h-2 rounded-full bg-[#C9A84C] shrink-0" title="Unsaved changes" />
               )}
             </button>
 
             {expanded && (
               <div className="px-5 pb-5 space-y-3 border-t border-[#1E2D4A]">
-                <textarea
-                  className="w-full min-h-[200px] mt-4 bg-[#0F1729] border border-[#1E2D4A] rounded-md px-4 py-3 text-sm text-[#F5F3EE] leading-relaxed resize-y focus:outline-none focus:border-[#C9A84C]/50 transition-colors"
-                  value={chapter.content}
-                  onChange={(e) =>
-                    updateChapterContent(chapter.chapter_index, e.target.value)
-                  }
-                />
-                {dirty && (
-                  <div className="flex justify-end">
-                    <button
-                      onClick={() => saveChapter(chapter)}
-                      disabled={saving}
-                      className="flex items-center gap-2 px-4 py-2 bg-[#C9A84C] text-[#0F1729] rounded-md text-sm font-semibold hover:bg-[#B8963E] transition-colors disabled:opacity-60"
-                    >
-                      <Save size={14} />
-                      {saving ? "Saving…" : "Save Chapter"}
-                    </button>
+                {isError ? (
+                  <div className="mt-4 space-y-3">
+                    <p className="text-sm text-red-400">
+                      This chapter failed to generate. Click below to retry.
+                    </p>
+                    {canRegenerate && (
+                      <button
+                        onClick={() => regenerateChapter(num)}
+                        disabled={regenerating}
+                        className="flex items-center gap-2 px-4 py-2 bg-[#1E2D4A] border border-red-900/50 text-red-400 rounded-md text-sm font-semibold hover:bg-red-900/20 transition-colors disabled:opacity-60"
+                      >
+                        <RefreshCw size={14} className={regenerating ? "animate-spin" : ""} />
+                        {regenerating ? "Regenerating…" : "Regenerate Chapter"}
+                      </button>
+                    )}
                   </div>
+                ) : (
+                  <>
+                    <textarea
+                      className="w-full min-h-[200px] mt-4 bg-[#0F1729] border border-[#1E2D4A] rounded-md px-4 py-3 text-sm text-[#F5F3EE] leading-relaxed resize-y focus:outline-none focus:border-[#C9A84C]/50 transition-colors"
+                      value={chapter.content}
+                      onChange={(e) => updateChapterContent(num, e.target.value)}
+                    />
+                    {dirty && (
+                      <div className="flex justify-end">
+                        <button
+                          onClick={() => saveChapter(chapter)}
+                          disabled={saving}
+                          className="flex items-center gap-2 px-4 py-2 bg-[#C9A84C] text-[#0F1729] rounded-md text-sm font-semibold hover:bg-[#B8963E] transition-colors disabled:opacity-60"
+                        >
+                          <Save size={14} />
+                          {saving ? "Saving…" : "Save Chapter"}
+                        </button>
+                      </div>
+                    )}
+                  </>
                 )}
               </div>
             )}

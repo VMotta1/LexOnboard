@@ -11,6 +11,14 @@ class TextbookChapterSchema(BaseModel):
     key_takeaways: list[str]
 
 
+class RegenerateChapterRequest(BaseModel):
+    chapter_number: int
+
+
+class RegenerateChapterResponse(BaseModel):
+    chapter: TextbookChapterSchema
+
+
 class TextbookResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

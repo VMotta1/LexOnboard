@@ -61,8 +61,9 @@ def _generate_chapter_with_retry(claude: Anthropic, chapter_num: int, section: d
             else:
                 logger.error(f"Chapter {chapter_num} failed after 3 rate limit retries — using placeholder")
         except Exception as exc:
-            logger.warning(f"Chapter {chapter_num} ({section.get('clause_type')}) failed: {exc}")
-            break
+            logger.warning(f"Chapter {chapter_num} ({section.get('clause_type')}) attempt {attempt + 1} failed: {exc}")
+            if attempt < 2:
+                time.sleep(5)
     return {
         "title": section.get("title", section.get("clause_type", "Unknown")),
         "chapter_number": chapter_num,
@@ -71,6 +72,16 @@ def _generate_chapter_with_retry(claude: Anthropic, chapter_num: int, section: d
         "clause_type": section.get("clause_type"),
         "quiz_id": None,
     }
+
+
+def regenerate_single_chapter(playbook, chapter_number: int) -> dict:
+    """Regenerate one failed section chapter. chapter_number is 1-based (maps to sections[chapter_number-1])."""
+    sections = playbook.sections or []
+    section_index = chapter_number - 1
+    if section_index < 0 or section_index >= len(sections):
+        raise ValueError(f"chapter_number {chapter_number} is out of range (have {len(sections)} sections)")
+    claude = _client()
+    return _generate_chapter_with_retry(claude, chapter_number, sections[section_index])
 
 
 def _generate_chapter(claude: Anthropic, chapter_num: int, section: dict) -> dict:
