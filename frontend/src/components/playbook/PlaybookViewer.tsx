@@ -6,13 +6,19 @@ import type { OrgPlaybook, PlaybookSection, StandardPosition } from "@/types";
 
 function ExpandablePosition({ position }: { position: StandardPosition }) {
   const [open, setOpen] = useState(false);
+
+  const title = position.title ?? position.description ?? "Standard Position";
+  const body = position.our_position ?? position.description ?? "";
+  const variations: string[] = position.acceptable_variations ??
+    (position.acceptable_range ? [position.acceptable_range] : []);
+
   return (
     <div className="border border-[#1E2D4A] rounded-md overflow-hidden">
       <button
         onClick={() => setOpen((p) => !p)}
         className="w-full flex items-center justify-between px-4 py-3 text-left hover:bg-[#1A2540] transition-colors"
       >
-        <span className="text-sm font-medium text-[#F5F3EE]">{position.title}</span>
+        <span className="text-sm font-medium text-[#F5F3EE]">{title}</span>
         {open ? (
           <ChevronDown size={15} className="text-[#64748B] shrink-0" />
         ) : (
@@ -21,12 +27,12 @@ function ExpandablePosition({ position }: { position: StandardPosition }) {
       </button>
       {open && (
         <div className="px-4 pb-4 space-y-3 border-t border-[#1E2D4A] pt-3">
-          <p className="text-sm text-[#F5F3EE]">{position.our_position}</p>
-          {position.acceptable_variations.length > 0 && (
+          {body && <p className="text-sm text-[#F5F3EE]">{body}</p>}
+          {variations.length > 0 && (
             <div>
               <p className="text-xs text-[#64748B] uppercase tracking-wider mb-1">Acceptable variations</p>
               <ul className="space-y-1">
-                {position.acceptable_variations.map((v, i) => (
+                {variations.map((v, i) => (
                   <li key={i} className="text-sm text-[#8899BB] flex gap-2">
                     <span className="text-[#64748B]">—</span> {v}
                   </li>
@@ -50,14 +56,14 @@ function SectionBlock({ section }: { section: PlaybookSection }) {
         {section.clause_type.replace(/_/g, " ")}
       </h2>
 
-      {section.non_negotiables.length > 0 && (
+      {(section.non_negotiables ?? []).length > 0 && (
         <div className="border border-red-800/50 rounded-lg p-4 bg-red-900/10">
           <div className="flex items-center gap-2 mb-3">
             <AlertOctagon size={16} className="text-red-400" />
             <span className="text-xs font-semibold text-red-400 uppercase tracking-wider">Non-Negotiables</span>
           </div>
           <ul className="space-y-2">
-            {section.non_negotiables.map((item, i) => (
+            {(section.non_negotiables ?? []).map((item, i) => (
               <li key={i} className="flex gap-2 text-sm text-[#F5F3EE]">
                 <span className="text-red-500 mt-0.5">•</span> {item}
               </li>
@@ -66,23 +72,23 @@ function SectionBlock({ section }: { section: PlaybookSection }) {
         </div>
       )}
 
-      {section.standard_positions.length > 0 && (
+      {(section.standard_positions ?? []).length > 0 && (
         <div className="space-y-2">
           <p className="text-xs font-semibold text-[#64748B] uppercase tracking-wider">Standard Positions</p>
-          {section.standard_positions.map((pos, i) => (
+          {(section.standard_positions ?? []).map((pos, i) => (
             <ExpandablePosition key={i} position={pos} />
           ))}
         </div>
       )}
 
-      {section.red_flags.length > 0 && (
+      {(section.red_flags ?? []).length > 0 && (
         <div className="border border-orange-700/50 rounded-lg p-4 bg-orange-900/10">
           <div className="flex items-center gap-2 mb-3">
             <AlertTriangle size={16} className="text-orange-400" />
             <span className="text-xs font-semibold text-orange-400 uppercase tracking-wider">Red Flags</span>
           </div>
           <ul className="space-y-2">
-            {section.red_flags.map((item, i) => (
+            {(section.red_flags ?? []).map((item, i) => (
               <li key={i} className="flex gap-2 text-sm text-[#F5F3EE]">
                 <span className="text-orange-500 mt-0.5">•</span> {item}
               </li>
@@ -104,7 +110,7 @@ function SectionBlock({ section }: { section: PlaybookSection }) {
   );
 }
 
-export function PlaybookViewer({ playbook }: { playbook: OrgPlaybook }) {
+export function PlaybookViewer({ playbook, activeSection }: { playbook: OrgPlaybook; activeSection?: string | null }) {
   if (!playbook.onboarding_ready) {
     return (
       <div className="text-center py-20 text-[#64748B]">
@@ -115,15 +121,13 @@ export function PlaybookViewer({ playbook }: { playbook: OrgPlaybook }) {
   }
 
   const sections: PlaybookSection[] = playbook.sections as PlaybookSection[];
+  const section = sections.find((s) => s.clause_type === activeSection) ?? sections[0];
+
+  if (!section) return null;
 
   return (
-    <div className="space-y-10">
-      {sections.map((section, i) => (
-        <div key={section.clause_type}>
-          <SectionBlock section={section} />
-          {i < sections.length - 1 && <hr className="mt-10 border-[#1E2D4A]" />}
-        </div>
-      ))}
+    <div>
+      <SectionBlock section={section} />
     </div>
   );
 }

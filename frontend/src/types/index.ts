@@ -19,17 +19,19 @@ export interface DocumentListItem {
 
 export interface PipelineStatus {
   job_id: string;
-  status: string;
-  progress: number;
   stage: string;
+  progress_pct: number;
   error?: string;
+  document_id?: string | null;
 }
 
 export interface StandardPosition {
-  title: string;
-  our_position: string;
-  acceptable_variations: string[];
-  rationale: string;
+  title?: string;
+  our_position?: string;
+  description?: string;
+  acceptable_variations?: string[];
+  acceptable_range?: string;
+  rationale?: string;
 }
 
 export interface PlaybookSection {
@@ -68,10 +70,14 @@ export interface TextbookContent {
 }
 
 export interface Question {
-  question: string;
+  id?: string;
+  question_type?: string;
+  text: string;
+  context?: string | null;
   options: string[];
   correct_answer: string;
   explanation: string;
+  clause_type?: string;
 }
 
 export interface QuizSet {
@@ -83,7 +89,9 @@ export interface QuizSet {
 export interface ChecklistItem {
   item: string;
   is_mandatory: boolean;
-  why_it_matters: string;
+  why_it_matters?: string;
+  risk_level?: "high" | "medium" | "low";
+  contract_value?: string;
 }
 
 export interface ChecklistCategory {

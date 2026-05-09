@@ -52,12 +52,13 @@ def _update_doc_status(
         db.commit()
 
 
-@celery_app.task(bind=True, max_retries=3, default_retry_delay=60)
-def process_document(self, document_id: str):
+def _process_document_impl(document_id: str, task_id: str) -> None:
     """
-    Full NLP pipeline for one document.
+    Core document-processing pipeline. Callable from either a Celery task or a
+    FastAPI BackgroundTasks coroutine. The task_id is used to key the Redis job
+    state the frontend polls.
+
     Stages: ingesting (10→30) → nlp_processing (35→80) → complete (100).
-    Admin must manually trigger playbook regeneration after this completes.
     """
     db = SessionLocal()
     org_id = ""
@@ -78,8 +79,7 @@ def process_document(self, document_id: str):
                 f"⚠ OCR mode — processing may take 2-5 min for doc {document_id}"
             )
 
-        # ── Step 2: Ingestion ────────────────────────────────────────────────
-        _set_job_state(self.request.id, "ingesting", 10, document_id, org_id)
+        _set_job_state(task_id, "ingesting", 10, document_id, org_id)
         _update_doc_status(db, document_id, "ingesting")
 
         from app.services.ingestion.extractor import extract_and_chunk
@@ -105,10 +105,9 @@ def process_document(self, document_id: str):
             raw_records.append(rc)
 
         db.commit()
-        _set_job_state(self.request.id, "ingesting", 30, document_id, org_id)
+        _set_job_state(task_id, "ingesting", 30, document_id, org_id)
 
-        # ── Step 3: NLP ──────────────────────────────────────────────────────
-        _set_job_state(self.request.id, "nlp", 35, document_id, org_id)
+        _set_job_state(task_id, "nlp", 35, document_id, org_id)
         _update_doc_status(db, document_id, "nlp_processing")
 
         from app.services.nlp.pipeline import process_document_nlp
@@ -119,7 +118,6 @@ def process_document(self, document_id: str):
         ]
         processed_dicts = process_document_nlp(raw_dicts, org_id, document_id)
 
-        # Build lookup for raw_clause_id → RawClause record
         raw_by_id = {str(rc.id): rc for rc in raw_records}
 
         processed_records: list[ProcessedClause] = []
@@ -143,9 +141,8 @@ def process_document(self, document_id: str):
             processed_records.append(pc)
 
         db.commit()
-        _set_job_state(self.request.id, "nlp", 65, document_id, org_id)
+        _set_job_state(task_id, "nlp", 65, document_id, org_id)
 
-        # ── Step 4: Embed ────────────────────────────────────────────────────
         from app.services.retrieval.embedder import EmbeddingService
 
         embed_input = [
@@ -165,31 +162,54 @@ def process_document(self, document_id: str):
                 pc.embedding_id = qdrant_id
 
         db.commit()
-        _set_job_state(self.request.id, "nlp", 80, document_id, org_id)
+        _set_job_state(task_id, "nlp", 80, document_id, org_id)
 
-        # ── Step 5: Complete ─────────────────────────────────────────────────
         _update_doc_status(db, document_id, "complete")
-        _set_job_state(self.request.id, "complete", 100, document_id, org_id)
+        _set_job_state(task_id, "distilling", 85, document_id, org_id)
+
+        # Close the doc DB session before regen opens its own
+        db.close()
+        db = None
+
+        try:
+            from app.tasks.regenerate_playbook import _regenerate_playbook_impl
+
+            _regenerate_playbook_impl(org_id)
+            logger.info(f"✓ Playbook regenerated for org {org_id}")
+        except Exception as regen_exc:
+            logger.error(
+                f"Playbook regen failed for org {org_id} (doc still processed): {regen_exc}",
+                exc_info=True,
+            )
+
+        _set_job_state(task_id, "complete", 100, document_id, org_id)
 
         logger.info(
             f"✓ Document {document_id} processed. "
-            f"{len(processed_records)} clauses indexed. "
-            "Admin must manually trigger playbook regeneration."
+            f"{len(processed_records)} clauses indexed."
         )
 
     except Exception as exc:
         logger.error(
-            f"process_document failed for {document_id}: {exc}", exc_info=True
+            f"_process_document_impl failed for {document_id}: {exc}",
+            exc_info=True,
         )
         try:
             _update_doc_status(db, document_id, "error", str(exc))
-            _set_job_state(
-                self.request.id, "error", 0, document_id, org_id, str(exc)
-            )
+            _set_job_state(task_id, "error", 0, document_id, org_id, str(exc))
         except Exception:
             pass
-
-        raise self.retry(exc=exc)
+        raise
 
     finally:
-        db.close()
+        if db is not None:
+            db.close()
+
+
+@celery_app.task(bind=True, max_retries=3, default_retry_delay=60)
+def process_document(self, document_id: str):
+    """Celery wrapper around `_process_document_impl`."""
+    try:
+        _process_document_impl(document_id, self.request.id)
+    except Exception as exc:
+        raise self.retry(exc=exc)

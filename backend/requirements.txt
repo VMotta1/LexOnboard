@@ -12,7 +12,8 @@ anthropic==0.36.1
 langchain==0.3.7
 langchain-community==0.3.7
 unstructured[pdf,docx,local-inference]==0.15.14
-spacy==3.7.6
+spacy==3.7.5
+numpy>=2.0,<3
 transformers==4.45.2
 torch==2.4.1
 pytesseract==0.3.13

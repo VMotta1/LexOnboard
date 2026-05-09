@@ -1,16 +1,19 @@
 import json
 import logging
+import time
 
-from anthropic import Anthropic
+from anthropic import Anthropic, RateLimitError
 
 from app.config import settings
 from app.services.generation.prompts import TEXTBOOK_CHAPTER_TEMPLATE, TEXTBOOK_SYSTEM_PROMPT
 
 logger = logging.getLogger(__name__)
 
-_MODEL = "claude-sonnet-4-20250514"
-_MAX_TOKENS_PER_CHAPTER = 1500
+_MODEL = "claude-haiku-4-5-20251001"
+_MAX_TOKENS_PER_CHAPTER = 1000
 _MAX_SECTIONS = 8  # page budget cap
+_INTER_CHAPTER_DELAY = 20   # seconds between chapters to stay under 4k output TPM
+_RATE_LIMIT_BACKOFF = 65    # seconds to wait on 429
 
 
 def _client() -> Anthropic:
@@ -33,22 +36,10 @@ def generate_textbook(playbook, org_name: str = "Your Organization") -> dict:
 
     for i, section in enumerate(sections[:_MAX_SECTIONS]):
         chapter_num = i + 1
-        try:
-            chapter = _generate_chapter(claude, chapter_num, section)
-            chapters.append(chapter)
-        except Exception as exc:
-            logger.warning(
-                f"textbook chapter {chapter_num} ({section.get('clause_type')}) failed: {exc}"
-            )
-            # Include a placeholder so chapter numbering stays intact
-            chapters.append({
-                "title": section.get("title", section.get("clause_type", "Unknown")),
-                "chapter_number": chapter_num,
-                "content": "_Content unavailable — generation error._",
-                "key_takeaways": [],
-                "clause_type": section.get("clause_type"),
-                "quiz_id": None,
-            })
+        if i > 0:
+            time.sleep(_INTER_CHAPTER_DELAY)
+        chapter = _generate_chapter_with_retry(claude, chapter_num, section)
+        chapters.append(chapter)
 
     # Final chapter: aggregated red flags summary (hardcoded, no Claude call)
     chapters.append(_red_flags_summary(len(chapters), sections))
@@ -56,6 +47,29 @@ def generate_textbook(playbook, org_name: str = "Your Organization") -> dict:
     return {
         "chapters": chapters,
         "page_estimate": _estimate_pages(chapters),
+    }
+
+
+def _generate_chapter_with_retry(claude: Anthropic, chapter_num: int, section: dict) -> dict:
+    for attempt in range(3):
+        try:
+            return _generate_chapter(claude, chapter_num, section)
+        except RateLimitError:
+            if attempt < 2:
+                logger.warning(f"Chapter {chapter_num} rate limited — waiting {_RATE_LIMIT_BACKOFF}s")
+                time.sleep(_RATE_LIMIT_BACKOFF)
+            else:
+                logger.error(f"Chapter {chapter_num} failed after 3 rate limit retries — using placeholder")
+        except Exception as exc:
+            logger.warning(f"Chapter {chapter_num} ({section.get('clause_type')}) failed: {exc}")
+            break
+    return {
+        "title": section.get("title", section.get("clause_type", "Unknown")),
+        "chapter_number": chapter_num,
+        "content": "_Content unavailable — generation error._",
+        "key_takeaways": [],
+        "clause_type": section.get("clause_type"),
+        "quiz_id": None,
     }
 
 

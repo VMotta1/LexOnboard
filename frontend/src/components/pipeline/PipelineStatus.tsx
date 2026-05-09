@@ -23,12 +23,12 @@ export function PipelineStatus({ jobId, onComplete }: PipelineStatusProps) {
         const data = await api.get<PipelineStatusType>(`/api/pipeline/status/${jobId}`);
         setStatus(data);
 
-        if (data.status === "complete" && !doneRef.current) {
+        if (data.stage === "complete" && !doneRef.current) {
           doneRef.current = true;
           clearInterval(interval);
           toast.success("Document processed — playbook updated");
           onComplete();
-        } else if (data.status === "error" && !doneRef.current) {
+        } else if (data.stage === "error" && !doneRef.current) {
           doneRef.current = true;
           clearInterval(interval);
           setError(data.error ?? "Processing failed.");
@@ -54,8 +54,8 @@ export function PipelineStatus({ jobId, onComplete }: PipelineStatusProps) {
     );
   }
 
-  const stages = status ? progressToStages(status.progress, status.stage) : progressToStages(0, "uploading");
-  const pct = status?.progress ?? 0;
+  const stages = status ? progressToStages(status.progress_pct, status.stage) : progressToStages(0, "uploading");
+  const pct = status?.progress_pct ?? 0;
 
   return (
     <div className="bg-[#0D1829] border border-[#1E2D4A] rounded-lg p-6 space-y-4">

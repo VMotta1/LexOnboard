@@ -5,7 +5,7 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException, Request, UploadFile
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Request, UploadFile
 from fastapi.params import File, Form
 
 from app.api.deps import get_org_id
@@ -49,9 +49,18 @@ def _detect_likely_ocr(file_path: str) -> bool:
         return False
 
 
+def _inline_processing_enabled() -> bool:
+    return os.getenv("LEXONBOARD_INLINE_PROCESSING", "true").lower() in {
+        "1",
+        "true",
+        "yes",
+    }
+
+
 @router.post("/upload", response_model=DocumentUploadResponse)
 async def upload_document(
     request: Request,
+    background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     doc_type: str = Form(...),
 ):
@@ -139,6 +148,34 @@ async def upload_document(
                     "error": None,
                     "updated_at": datetime.now(timezone.utc).isoformat(),
                 }),
+            )
+        elif _inline_processing_enabled():
+            # macOS dev fallback: run pipeline in-process via FastAPI BackgroundTasks
+            # to bypass Celery's libomp/SHM2 incompatibility with PyTorch on arm64.
+            from app.tasks.process_document import _process_document_impl
+
+            task_id = str(uuid.uuid4())
+            r = _redis()
+            r.setex(
+                f"job:{task_id}",
+                _REDIS_JOB_TTL,
+                json.dumps(
+                    {
+                        "stage": "queued",
+                        "progress_pct": 0,
+                        "document_id": str(doc_id),
+                        "org_id": org_id,
+                        "error": None,
+                        "updated_at": datetime.now(timezone.utc).isoformat(),
+                    }
+                ),
+            )
+
+            doc.job_id = task_id
+            db.commit()
+
+            background_tasks.add_task(
+                _process_document_impl, str(doc_id), task_id
             )
         else:
             from app.tasks.process_document import process_document

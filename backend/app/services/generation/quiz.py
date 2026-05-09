@@ -1,17 +1,19 @@
 import json
 import logging
 import random
+import time
 import uuid
 
-from anthropic import Anthropic
+from anthropic import Anthropic, RateLimitError
 
 from app.config import settings
 from app.services.generation.prompts import QUIZ_GENERATION_TEMPLATE
 
 logger = logging.getLogger(__name__)
 
-_MODEL = "claude-sonnet-4-20250514"
-_MAX_TOKENS = 2000
+_MODEL = "claude-haiku-4-5-20251001"
+_MAX_TOKENS = 1500
+_RATE_LIMIT_BACKOFF = 65
 
 # Clause types prioritised for the final assessment
 _PRIORITY_TYPES = [
@@ -48,27 +50,30 @@ def generate_quiz_for_chapter(chapter: dict, playbook_section: dict) -> dict:
     )
 
     claude = _client()
-    try:
-        response = claude.messages.create(
-            model=_MODEL,
-            max_tokens=_MAX_TOKENS,
-            temperature=0.3,
-            messages=[{"role": "user", "content": prompt}],
-        )
-        raw = response.content[0].text.strip()
-
-        # Strip markdown fences if present
-        if raw.startswith("```"):
-            raw = "\n".join(
-                line for line in raw.splitlines() if not line.startswith("```")
+    questions = _fallback_questions(clause_type)
+    for attempt in range(3):
+        try:
+            response = claude.messages.create(
+                model=_MODEL,
+                max_tokens=_MAX_TOKENS,
+                temperature=0.3,
+                messages=[{"role": "user", "content": prompt}],
             )
-
-        questions_raw = json.loads(raw)
-        questions = [_normalise_question(q, clause_type) for q in questions_raw]
-
-    except Exception as exc:
-        logger.warning(f"Quiz generation failed for chapter '{section_title}': {exc}")
-        questions = _fallback_questions(clause_type)
+            raw = response.content[0].text.strip()
+            if raw.startswith("```"):
+                raw = "\n".join(line for line in raw.splitlines() if not line.startswith("```"))
+            questions_raw = json.loads(raw)
+            questions = [_normalise_question(q, clause_type) for q in questions_raw]
+            break
+        except RateLimitError:
+            if attempt < 2:
+                logger.warning(f"Quiz rate limited for '{section_title}' — waiting {_RATE_LIMIT_BACKOFF}s")
+                time.sleep(_RATE_LIMIT_BACKOFF)
+            else:
+                logger.error(f"Quiz failed 3× rate limit for '{section_title}' — using fallback")
+        except Exception as exc:
+            logger.warning(f"Quiz generation failed for '{section_title}': {exc}")
+            break
 
     return {
         "id": str(uuid.uuid4()),

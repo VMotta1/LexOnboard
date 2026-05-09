@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Optional
+from typing import Any, Optional
 
 from pydantic import BaseModel, ConfigDict
 
@@ -60,7 +60,7 @@ class ContractChecklistResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: str
-    categories: list[ChecklistCategorySchema]
+    categories: list[Any]
 
 
 class QuizScoreUpdate(BaseModel):

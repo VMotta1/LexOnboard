@@ -79,73 +79,17 @@ _KEYWORD_MAP: list[tuple[str, str]] = [
 
 
 class ClauseClassifier:
-    _model = None
-    _tokenizer = None
-    _use_fallback: bool = False
+    # Keyword classifier is the primary implementation.
+    # CUAD-RoBERTa (theatticusproject/cuad-roberta) is no longer available on
+    # HuggingFace Hub — keeping keyword approach which covers all 20 CUAD labels.
 
     @classmethod
     def get_model(cls):
-        if cls._model is None and not cls._use_fallback:
-            try:
-                from transformers import (
-                    AutoModelForSequenceClassification,
-                    AutoTokenizer,
-                )
-
-                logger.info(
-                    "Loading CUAD-RoBERTa classifier (first use) — ~500MB"
-                )
-                cls._tokenizer = AutoTokenizer.from_pretrained(
-                    "theatticusproject/cuad-roberta"
-                )
-                cls._model = AutoModelForSequenceClassification.from_pretrained(
-                    "theatticusproject/cuad-roberta"
-                )
-                cls._model.eval()
-                logger.info("CUAD-RoBERTa classifier loaded.")
-            except Exception as exc:
-                logger.warning(
-                    f"Could not load CUAD-RoBERTa ({exc}). "
-                    "Falling back to keyword-based classification."
-                )
-                cls._use_fallback = True
-
-        return cls._model
+        return None
 
     @classmethod
     def classify(cls, text: str) -> tuple[str, float]:
-        """Return (clause_type, confidence). Falls back to keyword matching if model unavailable."""
-        model = cls.get_model()
-
-        if model is not None and not cls._use_fallback:
-            try:
-                import torch
-                import torch.nn.functional as F
-
-                inputs = cls._tokenizer(
-                    text[:512],
-                    return_tensors="pt",
-                    truncation=True,
-                    max_length=512,
-                )
-                with torch.no_grad():
-                    logits = model(**inputs).logits
-
-                probs = F.softmax(logits, dim=-1)
-                confidence, predicted_idx = probs.max(dim=-1)
-                confidence_val = float(confidence.item())
-
-                label_map = getattr(model.config, "id2label", {})
-                clause_type = label_map.get(int(predicted_idx.item()), "unclassified")
-
-                if confidence_val < 0.5:
-                    clause_type = "unclassified"
-
-                return clause_type, confidence_val
-
-            except Exception as exc:
-                logger.warning(f"Classifier forward pass failed: {exc}. Using keyword fallback.")
-
+        """Return (clause_type, confidence) via keyword matching."""
         return cls._keyword_classify(text)
 
     @classmethod

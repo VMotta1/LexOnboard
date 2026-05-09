@@ -1,94 +1,63 @@
 import logging
+import re
 
 logger = logging.getLogger(__name__)
 
-_MODAL_WORDS = frozenset({"shall", "must", "will", "may"})
-_MODAL_PHRASES = ("agrees to", "is required to", "is obligated to")
-_MANDATORY_MODALS = frozenset({"shall", "must", "is required to", "is obligated to"})
+_MODAL_PATTERN = re.compile(
+    r'\b(shall|must|will|may|agrees?\s+to|is\s+required\s+to|is\s+obligated\s+to)\b',
+    re.IGNORECASE,
+)
+_MANDATORY_MODALS = {"shall", "must", "is required to", "is obligated to", "agrees to"}
 
-_spacy_model = None
-
-
-def _get_spacy_model():
-    global _spacy_model
-    if _spacy_model is None:
-        import spacy
-
-        try:
-            _spacy_model = spacy.load("en_core_web_sm")
-        except OSError:
-            logger.warning("en_core_web_sm not found — downloading")
-            from spacy.cli import download as spacy_download
-
-            spacy_download("en_core_web_sm")
-            _spacy_model = spacy.load("en_core_web_sm")
-    return _spacy_model
+# Split on sentence boundaries (period/semicolon followed by whitespace + capital)
+_SENT_SPLIT = re.compile(r'(?<=[.;])\s+(?=[A-Z])')
 
 
-def _find_subject(verb_token) -> str:
-    """Return the nominal subject of a verb as a string."""
-    for child in verb_token.children:
-        if child.dep_ in ("nsubj", "nsubjpass"):
-            parts = [
-                t.text
-                for t in child.subtree
-                if t.dep_ in ("compound", "nsubj", "nsubjpass", "amod") or t == child
-            ]
-            return " ".join(parts)[:100]
-    return "party"
+def _split_sentences(text: str) -> list[str]:
+    return [s.strip() for s in _SENT_SPLIT.split(text) if s.strip()]
 
 
-def _find_action(modal_token, head_token) -> str:
-    """Extract the main action phrase from modal + head verb."""
-    parts = [head_token.text]
-    for child in head_token.children:
-        if child.dep_ in ("dobj", "xcomp", "ccomp", "prep") and child != modal_token:
-            parts.append(child.text)
-            for grandchild in child.children:
-                if grandchild.dep_ in ("pobj", "dobj"):
-                    parts.append(grandchild.text)
-                    break
-    return " ".join(parts)[:200]
+def _extract_subject(sentence: str, modal_start: int) -> str:
+    before = sentence[:modal_start].strip()
+    # Take last 6 words before modal as subject proxy
+    words = before.split()
+    subject = " ".join(words[-6:]) if words else "party"
+    return subject[:100] or "party"
+
+
+def _extract_action(sentence: str, modal_end: int) -> str:
+    after = sentence[modal_end:].strip()
+    # Take up to 10 words after modal as action
+    words = after.split()
+    return " ".join(words[:10])[:200]
 
 
 def extract_obligations(text: str) -> list[dict]:
     """
-    Extract (party, modal, action, is_mandatory) obligation tuples via spaCy dep parse.
-    Returns [] on any failure — never raises.
+    Extract obligation tuples via regex. Returns [] on failure — never raises.
     """
     try:
-        nlp = _get_spacy_model()
-        doc = nlp(text)
+        sentences = _split_sentences(text)
         obligations: list[dict] = []
 
-        for sent in doc.sents:
-            sent_lower = sent.text.lower()
+        for sentence in sentences:
+            for match in _MODAL_PATTERN.finditer(sentence):
+                modal_raw = match.group(0)
+                modal = modal_raw.lower().strip()
+                is_mandatory = any(m in modal for m in _MANDATORY_MODALS)
 
-            # Quick filter before full dep parse traversal
-            has_modal = any(m in sent_lower for m in _MODAL_WORDS) or any(
-                p in sent_lower for p in _MODAL_PHRASES
-            )
-            if not has_modal:
-                continue
+                subject = _extract_subject(sentence, match.start())
+                action = _extract_action(sentence, match.end())
 
-            for token in sent:
-                if token.text.lower() not in _MODAL_WORDS:
+                if not action:
                     continue
 
-                modal = token.text.lower()
-                head = token.head
-                subject = _find_subject(head)
-                action = _find_action(token, head)
-                is_mandatory = modal in _MANDATORY_MODALS
-
-                obligations.append(
-                    {
-                        "party": subject,
-                        "modal": modal,
-                        "action": action,
-                        "is_mandatory": is_mandatory,
-                    }
-                )
+                obligations.append({
+                    "party": subject,
+                    "modal": modal,
+                    "action": action,
+                    "is_mandatory": is_mandatory,
+                })
 
                 if len(obligations) >= 10:
                     return obligations

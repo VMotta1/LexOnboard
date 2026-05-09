@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useContext, useState, ReactNode, createElement } from "react";
+import { createContext, useContext, useState, useEffect, ReactNode, createElement } from "react";
 import { DEV_ORG_ID, DEV_USER_ID, DEV_USER_ROLE, setApiRole } from "./api";
 
 interface DevContextValue {
@@ -20,9 +20,18 @@ const DevContext = createContext<DevContextValue>({
 export function DevContextProvider({ children }: { children: ReactNode }) {
   const [role, setRoleState] = useState(DEV_USER_ROLE);
 
+  useEffect(() => {
+    const stored = localStorage.getItem("lex-role");
+    if (stored && stored !== DEV_USER_ROLE) {
+      setRoleState(stored);
+      setApiRole(stored);
+    }
+  }, []);
+
   function setRole(newRole: string) {
     setRoleState(newRole);
     setApiRole(newRole);
+    localStorage.setItem("lex-role", newRole);
   }
 
   return createElement(

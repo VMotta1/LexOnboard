@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import {
   LayoutGrid,
   Upload,
@@ -38,6 +38,7 @@ const NEW_HIRE_NAV: NavItem[] = [
 
 export function Sidebar() {
   const pathname = usePathname();
+  const router = useRouter();
   const { role, setRole } = useDevContext();
 
   const isAdmin = role === "admin" || role === "lawyer";
@@ -49,7 +50,7 @@ export function Sidebar() {
       : pathname.startsWith(href);
 
   return (
-    <aside className="w-60 min-h-screen bg-[#0A1020] border-r border-[#1E2D4A] flex flex-col shrink-0">
+    <aside className="w-60 h-screen sticky top-0 bg-[#0A1020] border-r border-[#1E2D4A] flex flex-col shrink-0">
       <div className="px-6 py-6">
         <span
           className="text-[#C9A84C] font-[family-name:var(--font-playfair)] text-xl font-semibold tracking-wide"
@@ -86,7 +87,7 @@ export function Sidebar() {
           </span>
           <div className="flex gap-2">
             <button
-              onClick={() => setRole("admin")}
+              onClick={() => { setRole("admin"); router.push("/dashboard"); }}
               className={[
                 "flex-1 text-xs py-1.5 rounded border transition-colors",
                 role === "admin" || role === "lawyer"
@@ -97,7 +98,7 @@ export function Sidebar() {
               Admin
             </button>
             <button
-              onClick={() => setRole("new_hire")}
+              onClick={() => { setRole("new_hire"); router.push("/onboarding"); }}
               className={[
                 "flex-1 text-xs py-1.5 rounded border transition-colors",
                 role === "new_hire"
