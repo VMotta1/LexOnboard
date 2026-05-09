@@ -12,6 +12,8 @@ import {
   CheckCircle,
   List,
   MessageSquare,
+  Clock,
+  PencilLine,
 } from "lucide-react";
 import { useDevContext } from "@/lib/context";
 
@@ -25,6 +27,8 @@ const ADMIN_NAV: NavItem[] = [
   { label: "Dashboard", href: "/dashboard", icon: <LayoutGrid size={18} /> },
   { label: "Documents", href: "/dashboard/upload", icon: <Upload size={18} /> },
   { label: "Playbook", href: "/dashboard/playbook", icon: <Book size={18} /> },
+  { label: "Time Savings", href: "/admin/time-savings", icon: <Clock size={18} /> },
+  { label: "Content Editor", href: "/admin/content-editor", icon: <PencilLine size={18} /> },
   { label: "Settings", href: "/dashboard/settings", icon: <Settings size={18} /> },
 ];
 

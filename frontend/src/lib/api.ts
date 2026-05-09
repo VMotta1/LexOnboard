@@ -82,4 +82,22 @@ export const api = {
       body: formData,
     }).then((r) => handleResponse<T>(r));
   },
+
+  put<T>(path: string, body?: unknown): Promise<T> {
+    return fetch(`${BASE_URL}${path}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json", ...authHeaders() },
+      body: body !== undefined ? JSON.stringify(body) : undefined,
+    }).then((r) => handleResponse<T>(r));
+  },
+};
+
+// TODO: implement backend PUT endpoints for content editing
+export const contentEditorApi = {
+  saveChapter: (_chapterNumber: number, _content: string): Promise<{ ok: true }> =>
+    Promise.resolve({ ok: true }),
+  saveQuizSet: (_quizId: string, _questions: unknown[]): Promise<{ ok: true }> =>
+    Promise.resolve({ ok: true }),
+  saveChecklist: (_categories: unknown[]): Promise<{ ok: true }> =>
+    Promise.resolve({ ok: true }),
 };
