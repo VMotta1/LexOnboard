@@ -1,16 +1,19 @@
 import json
 import logging
+import time
+from collections import defaultdict
 
-from anthropic import Anthropic
+from anthropic import Anthropic, RateLimitError
 
 from app.config import settings
 from app.services.generation.prompts import CHECKLIST_GENERATION_PROMPT
 
 logger = logging.getLogger(__name__)
 
-_MODEL = "claude-sonnet-4-20250514"
-_MAX_TOKENS = 4000
-_MIN_CATEGORIES = 3
+_MODEL = "claude-haiku-4-5-20251001"
+_MAX_TOKENS = 2000
+_INTER_CALL_DELAY = 3
+_RATE_LIMIT_BACKOFF = 65
 
 
 def _client() -> Anthropic:
@@ -20,28 +23,49 @@ def _client() -> Anthropic:
 def generate_checklist(playbook) -> dict:
     """
     Generate a ContractChecklist from an OrgPlaybook.
-    playbook: OrgPlaybook SQLAlchemy model.
+    Calls Claude once per section so each checklist item embeds actual extracted_values.
     Returns dict matching ContractChecklist DB structure.
     """
     sections = playbook.sections or []
-
-    # Summarised playbook: only non_negotiables + clause types to keep token count manageable
-    summary = {
-        "sections": [
-            {
-                "clause_type": s.get("clause_type", ""),
-                "title": s.get("title", ""),
-                "non_negotiables": s.get("non_negotiables", []),
-            }
-            for s in sections
-        ]
-    }
-    playbook_json = json.dumps(summary, indent=2)
-
-    prompt = CHECKLIST_GENERATION_PROMPT.format(playbook_json=playbook_json)
     claude = _client()
+    all_items: list[dict] = []
 
-    for attempt in range(2):
+    for i, section in enumerate(sections):
+        if i > 0:
+            time.sleep(_INTER_CALL_DELAY)
+
+        section_json = json.dumps(
+            {
+                "clause_type": section.get("clause_type", ""),
+                "title": section.get("title", ""),
+                "non_negotiables": section.get("non_negotiables", []),
+                "standard_positions": section.get("standard_positions", []),
+                "red_flags": section.get("red_flags", []),
+                "extracted_values": section.get("extracted_values", {}),
+            },
+            indent=2,
+        )
+
+        prompt = CHECKLIST_GENERATION_PROMPT.format(section_json=section_json)
+        items = _generate_section_items(claude, section.get("clause_type", "unknown"), prompt)
+        all_items.extend(items)
+
+    if not all_items:
+        logger.error("Checklist generation produced no items — returning fallback")
+        return {"categories": _fallback_categories(sections)}
+
+    # Group flat items by category field
+    grouped: dict[str, list[dict]] = defaultdict(list)
+    for item in all_items:
+        cat = item.get("category") or "Key Clause Checklist"
+        grouped[cat].append(item)
+
+    categories = [{"category": cat, "items": items} for cat, items in grouped.items()]
+    return {"categories": categories}
+
+
+def _generate_section_items(claude: Anthropic, clause_type: str, prompt: str) -> list[dict]:
+    for attempt in range(3):
         try:
             response = claude.messages.create(
                 model=_MODEL,
@@ -50,59 +74,43 @@ def generate_checklist(playbook) -> dict:
                 messages=[{"role": "user", "content": prompt}],
             )
             raw = response.content[0].text.strip()
-
-            # Strip markdown fences
             if raw.startswith("```"):
-                raw = "\n".join(
-                    line for line in raw.splitlines() if not line.startswith("```")
-                )
-
+                raw = "\n".join(line for line in raw.splitlines() if not line.startswith("```"))
             parsed = json.loads(raw)
-            categories = parsed.get("categories", [])
-
-            if len(categories) >= _MIN_CATEGORIES:
-                return {"categories": categories}
-
-            logger.warning(
-                f"Checklist attempt {attempt + 1}: only {len(categories)} categories "
-                f"(need >= {_MIN_CATEGORIES}), retrying"
-            )
-            prompt += "\n\nIMPORTANT: You must include at least 9 categories. Return ONLY valid JSON."
-
+            if isinstance(parsed, list):
+                return parsed
+            logger.warning(f"Checklist section '{clause_type}': expected list, got {type(parsed)}")
+            return []
+        except RateLimitError:
+            if attempt < 2:
+                logger.warning(f"Rate limited on '{clause_type}' — waiting {_RATE_LIMIT_BACKOFF}s")
+                time.sleep(_RATE_LIMIT_BACKOFF)
+            else:
+                logger.error(f"Rate limit hit 3 times on '{clause_type}' — skipping")
+                return []
         except Exception as exc:
-            logger.warning(f"Checklist generation attempt {attempt + 1} failed: {exc}")
-
-    logger.error("Checklist generation failed after 2 attempts — returning minimal fallback")
-    return {"categories": _fallback_categories(sections)}
+            logger.warning(f"Checklist section '{clause_type}' attempt {attempt + 1} failed: {exc}")
+            return []
+    return []
 
 
 def _fallback_categories(sections: list[dict]) -> list[dict]:
-    """Minimal deterministic checklist when Claude generation fails."""
-    items = []
-    for s in sections:
-        clause_type = s.get("clause_type", "General")
-        items.append({
-            "item_clause": s.get("title", clause_type),
-            "review_question": f"Have you reviewed the {clause_type} clause against org standards?",
-            "is_non_negotiable": bool(s.get("non_negotiables")),
-            "clause_type": clause_type,
-        })
-
-    return [
+    items = [
         {
-            "name": "I. Contract Standards Review",
-            "subcategories": [
-                {
-                    "name": "A. Key Clause Checklist",
-                    "items": items or [
-                        {
-                            "item_clause": "General Review",
-                            "review_question": "Has the contract been reviewed against org standards?",
-                            "is_non_negotiable": False,
-                            "clause_type": "General",
-                        }
-                    ],
-                }
-            ],
+            "item": f"Review the {s.get('clause_type', 'General')} clause — no specific values extracted",
+            "category": "Key Clause Checklist",
+            "risk_level": "medium",
+            "contract_value": "not extracted",
+            "is_mandatory": bool(s.get("non_negotiables")),
+        }
+        for s in sections
+    ] or [
+        {
+            "item": "Review the contract against org standards — generation failed",
+            "category": "Key Clause Checklist",
+            "risk_level": "medium",
+            "contract_value": "not extracted",
+            "is_mandatory": False,
         }
     ]
+    return [{"category": "Key Clause Checklist", "items": items}]

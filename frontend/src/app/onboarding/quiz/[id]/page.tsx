@@ -56,7 +56,10 @@ export default function QuizPage() {
 
   async function submitScore(finalAnswers: string[]) {
     if (!quiz) return;
-    const correctCount = finalAnswers.filter((a, i) => a === shuffled[i]?.correct_answer).length;
+    const correctCount = finalAnswers.filter((a, i) => {
+      const ans = shuffled[i]?.correct_answer ?? "";
+      return a === ans || a.startsWith(ans + ".") || a.startsWith(ans + " ");
+    }).length;
     const score = correctCount / shuffled.length;
     try {
       await api.patch<OnboardingProgress>("/api/onboarding/progress", {
@@ -118,6 +121,7 @@ export default function QuizPage() {
     if (!q) return null;
     return (
       <QuizCard
+        key={currentQ}
         question={q}
         questionNumber={currentQ + 1}
         total={shuffled.length}

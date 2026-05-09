@@ -15,6 +15,11 @@ interface QuizCardProps {
 
 const OPTION_LABELS = ["A", "B", "C", "D"];
 
+// Options may be "A. full text" while correct_answer is just "A"
+function matchesAnswer(option: string, answer: string): boolean {
+  return option === answer || option.startsWith(answer + ".") || option.startsWith(answer + " ");
+}
+
 export function QuizCard({ question, questionNumber, total, quizType, onAnswer, onNext }: QuizCardProps) {
   const [selected, setSelected] = useState<string | null>(null);
   const [answered, setAnswered] = useState(false);
@@ -23,13 +28,13 @@ export function QuizCard({ question, questionNumber, total, quizType, onAnswer, 
     if (answered) return;
     setSelected(option);
     setAnswered(true);
-    onAnswer(option, option === question.correct_answer);
+    onAnswer(option, matchesAnswer(option, question.correct_answer));
   }
 
   const isTrueFalse = question.options.length === 2 &&
     question.options.every((o) => ["True", "False"].includes(o));
 
-  const isCorrect = selected === question.correct_answer;
+  const isCorrect = selected !== null && matchesAnswer(selected, question.correct_answer);
 
   return (
     <div className="max-w-2xl mx-auto space-y-6">
@@ -42,7 +47,7 @@ export function QuizCard({ question, questionNumber, total, quizType, onAnswer, 
         </span>
       </div>
 
-      <p className="text-lg font-medium text-[#F5F3EE] leading-snug">{question.question}</p>
+      <p className="text-lg font-medium text-[#F5F3EE] leading-snug">{question.text}</p>
 
       {isTrueFalse ? (
         <div className="flex gap-4">
@@ -78,7 +83,7 @@ export function QuizCard({ question, questionNumber, total, quizType, onAnswer, 
           <div className="flex items-center gap-2">
             <Lightbulb size={14} className="text-[#C9A84C]" />
             <span className="text-xs font-semibold text-[#C9A84C] uppercase tracking-wider">
-              {isCorrect ? "Correct" : `Correct answer: ${question.correct_answer}`}
+              {isCorrect ? "Correct" : `Correct answer: ${question.options.find((o) => matchesAnswer(o, question.correct_answer)) ?? question.correct_answer}`}
             </span>
           </div>
           <p className="text-sm text-[#8899BB]">{question.explanation}</p>
@@ -99,8 +104,8 @@ export function QuizCard({ question, questionNumber, total, quizType, onAnswer, 
 
 function optionStyles(option: string, selected: string | null, correct: string, answered: boolean) {
   if (!answered) return "border-[#1E2D4A] text-[#F5F3EE] hover:border-[#C9A84C]/50";
-  if (option === correct) return "border-green-500 bg-green-900/20 text-[#F5F3EE]";
-  if (option === selected && option !== correct) return "border-red-500 bg-red-900/20 text-[#F5F3EE]";
+  if (matchesAnswer(option, correct)) return "border-green-500 bg-green-900/20 text-[#F5F3EE]";
+  if (option === selected && !matchesAnswer(option, correct)) return "border-red-500 bg-red-900/20 text-[#F5F3EE]";
   return "border-[#1E2D4A] text-[#64748B] opacity-50";
 }
 
@@ -111,8 +116,8 @@ function MCQButton({
   correct: string; answered: boolean; onSelect: (o: string) => void;
 }) {
   const styles = optionStyles(option, selected, correct, answered);
-  const isCorrect = option === correct && answered;
-  const isWrong = option === selected && option !== correct;
+  const isCorrect = matchesAnswer(option, correct) && answered;
+  const isWrong = option === selected && !matchesAnswer(option, correct);
 
   return (
     <button

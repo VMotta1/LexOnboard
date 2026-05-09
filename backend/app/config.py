@@ -14,6 +14,7 @@ class Settings(BaseSettings):
     SUPABASE_STORAGE_BUCKET: str = "documents"
     ENVIRONMENT: str = "development"
     DEMO_MODE: bool = False
+    LEXONBOARD_INLINE_PROCESSING: bool = True
 
     class Config:
         env_file = ".env"

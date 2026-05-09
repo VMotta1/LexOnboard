@@ -1,6 +1,8 @@
 import logging
+import time
 import uuid
 
+from app.api.cache import cache_delete_pattern, playbook_cache_key
 from app.celery_app import celery_app
 from app.database import SessionLocal
 from app.models.onboarding import ContractChecklist, OnboardingProgress, QuizSet, TextbookContent
@@ -10,12 +12,7 @@ from app.models.playbook import OrgPlaybook
 logger = logging.getLogger(__name__)
 
 
-@celery_app.task
-def generate_onboarding(org_id: str, playbook_id: str):
-    """
-    Generate textbook, quizzes, and checklist from the current OrgPlaybook.
-    Triggered automatically after regenerate_playbook completes.
-    """
+def _generate_onboarding_impl(org_id: str, playbook_id: str) -> None:
     db = SessionLocal()
     try:
         playbook = db.query(OrgPlaybook).filter(OrgPlaybook.id == uuid.UUID(playbook_id)).first()
@@ -27,6 +24,12 @@ def generate_onboarding(org_id: str, playbook_id: str):
         org_name = org.name if org else "Your Organization"
 
         sections = playbook.sections or []
+
+        # ── Clear stale onboarding content for this playbook ─────────────────
+        db.query(QuizSet).filter(QuizSet.playbook_id == uuid.UUID(playbook_id)).delete()
+        db.query(ContractChecklist).filter(ContractChecklist.playbook_id == uuid.UUID(playbook_id)).delete()
+        db.query(TextbookContent).filter(TextbookContent.playbook_id == uuid.UUID(playbook_id)).delete()
+        db.commit()
 
         # ── Textbook ─────────────────────────────────────────────────────────
         from app.services.generation.textbook import generate_textbook
@@ -51,14 +54,15 @@ def generate_onboarding(org_id: str, playbook_id: str):
         # ── Chapter Quizzes ───────────────────────────────────────────────────
         from app.services.generation.quiz import generate_final_assessment, generate_quiz_for_chapter
 
-        # Build section lookup by clause_type for quick access
         section_by_type = {s.get("clause_type"): s for s in sections}
 
         chapter_quizzes: list[dict] = []
-        for chapter in chapters:
+        for i, chapter in enumerate(chapters):
             clause_type = chapter.get("clause_type")
             if clause_type is None:
-                continue  # skip intro and red-flags chapters
+                continue
+            if i > 0:
+                time.sleep(20)
 
             section = section_by_type.get(clause_type, {"clause_type": clause_type})
             quiz_data = generate_quiz_for_chapter(chapter, section)
@@ -114,6 +118,9 @@ def generate_onboarding(org_id: str, playbook_id: str):
         playbook.onboarding_ready = True
         db.commit()
 
+        # Bust cache so next GET returns onboarding_ready=true
+        cache_delete_pattern(playbook_cache_key(org_id))
+
         logger.info(f"Onboarding content generation complete for org {org_id}")
 
     except Exception as exc:
@@ -124,3 +131,12 @@ def generate_onboarding(org_id: str, playbook_id: str):
         raise
     finally:
         db.close()
+
+
+@celery_app.task
+def generate_onboarding(org_id: str, playbook_id: str):
+    """
+    Generate textbook, quizzes, and checklist from the current OrgPlaybook.
+    Triggered automatically after regenerate_playbook completes.
+    """
+    _generate_onboarding_impl(org_id, playbook_id)

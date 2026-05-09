@@ -12,8 +12,12 @@ interface QuizResultsProps {
   onNext?: () => void;
 }
 
+function matchesAnswer(selected: string, answer: string): boolean {
+  return selected === answer || selected.startsWith(answer + ".") || selected.startsWith(answer + " ");
+}
+
 export function QuizResults({ questions, answers, onRetry, onNext }: QuizResultsProps) {
-  const correct = answers.filter((a, i) => a === questions[i]?.correct_answer).length;
+  const correct = answers.filter((a, i) => matchesAnswer(a, questions[i]?.correct_answer ?? "")).length;
   const total = questions.length;
   const passed = correct === total;
 
@@ -94,7 +98,7 @@ function QuestionSummary({
   index: number;
 }) {
   const [open, setOpen] = useState(false);
-  const correct = userAnswer === question.correct_answer;
+  const correct = matchesAnswer(userAnswer, question.correct_answer);
 
   return (
     <div className="border border-[#1E2D4A] rounded-md overflow-hidden">
@@ -111,7 +115,7 @@ function QuestionSummary({
           {correct ? <Check size={12} strokeWidth={3} /> : <X size={12} strokeWidth={3} />}
         </span>
         <span className="flex-1 text-sm text-left text-[#F5F3EE] truncate">
-          {index + 1}. {question.question}
+          {index + 1}. {question.text}
         </span>
         {open ? (
           <ChevronDown size={14} className="text-[#64748B] shrink-0" />
@@ -129,7 +133,9 @@ function QuestionSummary({
           {!correct && (
             <p>
               <span className="text-[#64748B]">Correct: </span>
-              <span className="text-green-400">{question.correct_answer}</span>
+              <span className="text-green-400">
+                {question.options.find((o) => matchesAnswer(o, question.correct_answer)) ?? question.correct_answer}
+              </span>
             </p>
           )}
           <p className="text-[#8899BB] italic">{question.explanation}</p>

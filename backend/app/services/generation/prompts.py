@@ -72,34 +72,37 @@ Generate exactly 4 questions in this JSON format:
 ]
 Return ONLY the JSON array."""
 
-CHECKLIST_GENERATION_PROMPT = """You are generating a contract review checklist for a company's new hires.
+CHECKLIST_GENERATION_PROMPT = """You are a contract review checklist generator. You will be given a structured playbook object for a single contract clause, including extracted values from the actual contract.
 
-Based on this company's contract playbook:
-{playbook_json}
+Generate a list of checklist items for this clause. Each item must be a SPECIFIC, BINARY (yes/no) or FACTUAL question that a reviewer can answer by reading the contract.
 
-Generate a comprehensive contract review checklist in this exact JSON structure:
-{{
-  "categories": [
-    {{
-      "name": "I. Tender Submission & Execution Preliminaries",
-      "subcategories": [
-        {{
-          "name": "A. Documents & Dates",
-          "items": [
-            {{
-              "item_clause": "Tender/Contract Name",
-              "review_question": "Is the official name or title noted and correct?",
-              "is_non_negotiable": false,
-              "clause_type": "Scope of Work"
-            }}
-          ]
-        }}
-      ]
-    }}
-  ]
-}}
+Clause playbook data:
+{section_json}
 
-Cover these categories minimum: Submission & Execution, Parties & Authority, Scope & Deliverables, \
-Time & Delays, Payment & Financial, Liability & Risk, IP & Confidentiality, Termination, \
-Governing Law. Mark is_non_negotiable: true for items that correspond to this org's non-negotiables. \
-Include 5-8 items per subcategory. Return ONLY valid JSON."""
+Rules:
+1. ALWAYS embed the actual contract value into the question.
+   BAD:  "Have you reviewed the Governing Law clause against org standards?"
+   GOOD: "Governing law is set to Delaware — does your org accept US-jurisdiction contracts?"
+
+2. Cover these dimensions for EVERY clause (where applicable):
+   - Is the specific value written (jurisdiction, %, mechanism, party) acceptable to your org?
+   - Are there missing protections (e.g. no cure period, no consent requirement for assignment)?
+   - Are there uncapped exposures (indemnification triggers, IP carve-outs)?
+   - Does the clause comply with applicable privacy law (PIPEDA, GDPR)?
+   - Are insurance minimums sufficient?
+   - Is IP ownership clearly retained by your org?
+
+3. For financial/numeric clauses, always ask:
+   - Is the cap formula (e.g. "fees paid in prior 12 months") sufficient in a worst-case scenario?
+   - Are there exclusions that effectively make it uncapped?
+
+4. Format each checklist item as:
+   {{
+     "item": "<specific question embedding the actual contract value>",
+     "category": "<Compliance | Key Clause Checklist | Risk Flags>",
+     "risk_level": "<high | medium | low>",
+     "contract_value": "<the exact value extracted from the contract — if not present, describe what is missing, e.g. 'no cure period specified'>",
+     "is_mandatory": <true if this corresponds to a non-negotiable in the playbook, false otherwise>
+   }}
+
+5. Generate 4-8 items for this clause. Return a JSON array. No markdown, no preamble."""

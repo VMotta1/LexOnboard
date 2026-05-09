@@ -165,12 +165,28 @@ def _process_document_impl(document_id: str, task_id: str) -> None:
         _set_job_state(task_id, "nlp", 80, document_id, org_id)
 
         _update_doc_status(db, document_id, "complete")
+        _set_job_state(task_id, "distilling", 85, document_id, org_id)
+
+        # Close the doc DB session before regen opens its own
+        db.close()
+        db = None
+
+        try:
+            from app.tasks.regenerate_playbook import _regenerate_playbook_impl
+
+            _regenerate_playbook_impl(org_id)
+            logger.info(f"✓ Playbook regenerated for org {org_id}")
+        except Exception as regen_exc:
+            logger.error(
+                f"Playbook regen failed for org {org_id} (doc still processed): {regen_exc}",
+                exc_info=True,
+            )
+
         _set_job_state(task_id, "complete", 100, document_id, org_id)
 
         logger.info(
             f"✓ Document {document_id} processed. "
-            f"{len(processed_records)} clauses indexed. "
-            "Admin must manually trigger playbook regeneration."
+            f"{len(processed_records)} clauses indexed."
         )
 
     except Exception as exc:
@@ -186,7 +202,8 @@ def _process_document_impl(document_id: str, task_id: str) -> None:
         raise
 
     finally:
-        db.close()
+        if db is not None:
+            db.close()
 
 
 @celery_app.task(bind=True, max_retries=3, default_retry_delay=60)

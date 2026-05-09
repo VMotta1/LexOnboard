@@ -5,7 +5,7 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
 from fastapi.responses import FileResponse
 from sqlalchemy.orm.attributes import flag_modified
 
@@ -107,13 +107,11 @@ async def list_playbook_versions(request: Request):
 
 
 @router.post("/regenerate")
-async def regenerate_playbook(request: Request):
+async def regenerate_playbook(request: Request, background_tasks: BackgroundTasks):
     # TODO: replace get_org_id with real auth when auth is implemented
-    # NOTE: This is the ONLY way to trigger playbook regeneration. Never automatic.
     org_id = get_org_id(request)
     db = SessionLocal()
     try:
-        # Require at least one complete document before regenerating
         complete_doc = (
             db.query(Document)
             .filter(
@@ -134,10 +132,9 @@ async def regenerate_playbook(request: Request):
     finally:
         db.close()
 
-    from app.tasks.regenerate_playbook import regenerate_playbook as regen_task
+    from app.tasks.regenerate_playbook import _regenerate_playbook_impl
 
-    task = regen_task.delay(org_id)
-
+    regen_id = str(uuid.uuid4())
     r = _redis()
     r.setex(
         f"playbook_regen:{org_id}",
@@ -145,13 +142,14 @@ async def regenerate_playbook(request: Request):
         json.dumps(
             {
                 "stage": "queued",
-                "job_id": task.id,
+                "job_id": regen_id,
                 "started_at": datetime.now(timezone.utc).isoformat(),
             }
         ),
     )
+    background_tasks.add_task(_regenerate_playbook_impl, org_id)
 
-    return {"message": "Playbook regeneration started", "job_id": task.id}
+    return {"message": "Playbook regeneration started", "job_id": regen_id}
 
 
 @router.get("/regenerate/status")

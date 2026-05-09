@@ -13,18 +13,32 @@ export default function PlaybookPage() {
   const [activeSection, setActiveSection] = useState<string | null>(null);
 
   useEffect(() => {
-    api
-      .get<OrgPlaybook>("/api/playbook/current")
-      .then((data) => {
-        setPlaybook(data);
-        const sections = data.sections as PlaybookSection[];
-        if (sections.length > 0) setActiveSection(sections[0].clause_type);
-      })
-      .catch((err) => {
-        setError(err instanceof ApiError ? err.message : "Failed to load playbook");
-      })
-      .finally(() => setLoading(false));
-  }, []);
+    let interval: ReturnType<typeof setInterval> | null = null;
+
+    function fetchPlaybook() {
+      api
+        .get<OrgPlaybook>("/api/playbook/current")
+        .then((data) => {
+          setPlaybook(data);
+          const sections = data.sections as PlaybookSection[];
+          if (sections.length > 0 && !activeSection) setActiveSection(sections[0].clause_type);
+          if (data.onboarding_ready && interval) {
+            clearInterval(interval);
+            interval = null;
+          }
+        })
+        .catch((err) => {
+          setError(err instanceof ApiError ? err.message : "Failed to load playbook");
+          if (interval) { clearInterval(interval); interval = null; }
+        })
+        .finally(() => setLoading(false));
+    }
+
+    fetchPlaybook();
+    interval = setInterval(fetchPlaybook, 5000);
+
+    return () => { if (interval) clearInterval(interval); };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const sections: PlaybookSection[] = (playbook?.sections as PlaybookSection[]) ?? [];
 
@@ -40,19 +54,18 @@ export default function PlaybookPage() {
           </div>
         ) : (
           sections.map((s) => (
-            <a
+            <button
               key={s.clause_type}
-              href={`#${s.clause_type}`}
               onClick={() => setActiveSection(s.clause_type)}
               className={[
-                "block text-sm px-3 py-2 rounded transition-colors capitalize",
+                "w-full text-left text-sm px-3 py-2 rounded transition-colors capitalize",
                 activeSection === s.clause_type
                   ? "border-l-2 border-[#C9A84C] pl-[10px] bg-[#1A2540] text-[#F5F3EE]"
                   : "text-[#64748B] hover:text-[#F5F3EE] hover:bg-[#131E33]",
               ].join(" ")}
             >
               {s.clause_type.replace(/_/g, " ")}
-            </a>
+            </button>
           ))
         )}
       </aside>
@@ -70,7 +83,7 @@ export default function PlaybookPage() {
             <p className="text-sm text-[#64748B]">Upload documents to generate a playbook.</p>
           </div>
         )}
-        {!loading && playbook && <PlaybookViewer playbook={playbook} />}
+        {!loading && playbook && <PlaybookViewer playbook={playbook} activeSection={activeSection} />}
       </div>
 
       <aside className="w-[180px] shrink-0 space-y-4">
@@ -83,7 +96,9 @@ export default function PlaybookPage() {
             <div className="space-y-1">
               <p className="text-xs font-semibold text-[#64748B] uppercase tracking-wider">Generated</p>
               <p className="text-sm text-[#8899BB]">
-                {new Date(playbook.created_at).toLocaleDateString()}
+                {playbook.created_at && !isNaN(new Date(playbook.created_at).getTime())
+                  ? new Date(playbook.created_at).toLocaleDateString()
+                  : new Date().toLocaleDateString()}
               </p>
             </div>
             <div className="space-y-1">
