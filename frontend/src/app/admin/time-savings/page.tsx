@@ -1,46 +1,29 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Clock, CheckSquare, Square } from "lucide-react";
+import { api } from "@/lib/api";
 
 type Category = "Textbook" | "Quiz" | "Final Assessment" | "Checklist";
 
 interface ReviewItem {
-  id: number;
+  id: string;
   label: string;
   category: Category;
   minutes: number;
 }
 
-// 10 textbook chapters (240 min) + 8 chapter quizzes (200 min) +
-// 1 final assessment (60 min) + 1 contract checklist (100 min) = 600 min
-const REVIEW_ITEMS: ReviewItem[] = [
-  { id: 1,  label: "Textbook — Chapter 1: Introduction & Contract Framework",  category: "Textbook",          minutes: 20 },
-  { id: 2,  label: "Textbook — Chapter 2: Clause Coverage",                    category: "Textbook",          minutes: 25 },
-  { id: 3,  label: "Textbook — Chapter 3: Clause Coverage",                    category: "Textbook",          minutes: 25 },
-  { id: 4,  label: "Textbook — Chapter 4: Clause Coverage",                    category: "Textbook",          minutes: 25 },
-  { id: 5,  label: "Textbook — Chapter 5: Clause Coverage",                    category: "Textbook",          minutes: 25 },
-  { id: 6,  label: "Textbook — Chapter 6: Clause Coverage",                    category: "Textbook",          minutes: 25 },
-  { id: 7,  label: "Textbook — Chapter 7: Clause Coverage",                    category: "Textbook",          minutes: 25 },
-  { id: 8,  label: "Textbook — Chapter 8: Clause Coverage",                    category: "Textbook",          minutes: 25 },
-  { id: 9,  label: "Textbook — Chapter 9: Clause Coverage",                    category: "Textbook",          minutes: 25 },
-  { id: 10, label: "Textbook — Chapter 10: Red Flags Summary",                 category: "Textbook",          minutes: 20 },
-  { id: 11, label: "Chapter Quiz 1 — Questions & Answer Key",                  category: "Quiz",              minutes: 25 },
-  { id: 12, label: "Chapter Quiz 2 — Questions & Answer Key",                  category: "Quiz",              minutes: 25 },
-  { id: 13, label: "Chapter Quiz 3 — Questions & Answer Key",                  category: "Quiz",              minutes: 25 },
-  { id: 14, label: "Chapter Quiz 4 — Questions & Answer Key",                  category: "Quiz",              minutes: 25 },
-  { id: 15, label: "Chapter Quiz 5 — Questions & Answer Key",                  category: "Quiz",              minutes: 25 },
-  { id: 16, label: "Chapter Quiz 6 — Questions & Answer Key",                  category: "Quiz",              minutes: 25 },
-  { id: 17, label: "Chapter Quiz 7 — Questions & Answer Key",                  category: "Quiz",              minutes: 25 },
-  { id: 18, label: "Chapter Quiz 8 — Questions & Answer Key",                  category: "Quiz",              minutes: 25 },
-  { id: 19, label: "Final Assessment — Comprehensive Knowledge Check",          category: "Final Assessment",  minutes: 60 },
-  { id: 20, label: "Contract Checklist — All Categories & Risk Items",          category: "Checklist",         minutes: 100 },
-];
+interface ApiChapter {
+  chapter_number: number;
+  title: string;
+  content: string;
+}
+
+interface ApiTextbook {
+  chapters: ApiChapter[];
+}
 
 const TOTAL_ESTIMATE_MINUTES = 600;
-
-// Pre-check Quiz 7, Quiz 8, Final Assessment → 25 + 25 + 60 = 110 min
-const INITIAL_COMPLETED = new Set([17, 18, 19]);
 
 const CATEGORY_STYLES: Record<Category, string> = {
   "Textbook":         "text-[#7B9FDB] bg-[#7B9FDB]/10",
@@ -48,6 +31,74 @@ const CATEGORY_STYLES: Record<Category, string> = {
   "Final Assessment": "text-[#C9A84C] bg-[#C9A84C]/10",
   "Checklist":        "text-[#C97B7B] bg-[#C97B7B]/10",
 };
+
+function chapterMinutes(chapterNumber: number, total: number): number {
+  // intro (0) and red flags (last) get 20 min; section chapters get 25 min
+  if (chapterNumber === 0 || chapterNumber === total - 1) return 20;
+  return 25;
+}
+
+function buildItems(chapters: ApiChapter[]): ReviewItem[] {
+  const items: ReviewItem[] = [];
+
+  chapters.forEach((ch) => {
+    items.push({
+      id: `chapter-${ch.chapter_number}`,
+      label: `Textbook — ${ch.title}`,
+      category: "Textbook",
+      minutes: chapterMinutes(ch.chapter_number, chapters.length),
+    });
+  });
+
+  // 8 chapter quizzes
+  for (let i = 1; i <= 8; i++) {
+    items.push({
+      id: `quiz-${i}`,
+      label: `Chapter Quiz ${i} — Questions & Answer Key`,
+      category: "Quiz",
+      minutes: 25,
+    });
+  }
+
+  items.push({
+    id: "final",
+    label: "Final Assessment — Comprehensive Knowledge Check",
+    category: "Final Assessment",
+    minutes: 60,
+  });
+
+  items.push({
+    id: "checklist",
+    label: "Contract Checklist — All Categories & Risk Items",
+    category: "Checklist",
+    minutes: 100,
+  });
+
+  return items;
+}
+
+// Fallback items when textbook hasn't loaded yet
+const FALLBACK_CHAPTER_LABELS = [
+  "Introduction & Contract Framework",
+  "Clause Coverage — Limitation of Liability",
+  "Clause Coverage — IP Ownership",
+  "Clause Coverage — Indemnification",
+  "Clause Coverage — Termination",
+  "Clause Coverage — Data Privacy",
+  "Clause Coverage — International Transfers",
+  "Clause Coverage — Payment Terms",
+  "Clause Coverage — Dispute Resolution",
+  "Red Flags & Common Mistakes",
+];
+
+function buildFallbackItems(): ReviewItem[] {
+  const chapters: ApiChapter[] = FALLBACK_CHAPTER_LABELS.map((title, i) => ({
+    chapter_number: i,
+    title,
+    content: "",
+  }));
+  return buildItems(chapters);
+}
 
 function formatMinutes(total: number): string {
   if (total < 60) return `${total} min`;
@@ -57,11 +108,22 @@ function formatMinutes(total: number): string {
 }
 
 export default function TimeSavingsPage() {
-  const [completedIds, setCompletedIds] = useState<Set<number>>(
-    new Set(INITIAL_COMPLETED)
+  const [items, setItems] = useState<ReviewItem[]>(buildFallbackItems);
+  // Pre-check quiz-7, quiz-8, final → 25 + 25 + 60 = 110 min on load
+  const [completedIds, setCompletedIds] = useState<Set<string>>(
+    new Set(["quiz-7", "quiz-8", "final"])
   );
 
-  function toggle(id: number) {
+  useEffect(() => {
+    api
+      .get<ApiTextbook>("/api/onboarding/textbook")
+      .then((data) => setItems(buildItems(data.chapters)))
+      .catch(() => {
+        // keep fallback items
+      });
+  }, []);
+
+  function toggle(id: string) {
     setCompletedIds((prev) => {
       const next = new Set(prev);
       if (next.has(id)) {
@@ -73,10 +135,10 @@ export default function TimeSavingsPage() {
     });
   }
 
-  const savedMinutes = REVIEW_ITEMS.filter((i) => completedIds.has(i.id)).reduce(
-    (sum, i) => sum + i.minutes,
-    0
-  );
+  const savedMinutes = items
+    .filter((i) => completedIds.has(i.id))
+    .reduce((sum, i) => sum + i.minutes, 0);
+
   const progressPct = Math.min(
     100,
     Math.round((savedMinutes / TOTAL_ESTIMATE_MINUTES) * 100)
@@ -119,7 +181,7 @@ export default function TimeSavingsPage() {
           <div className="flex justify-between text-xs text-[#64748B]">
             <span>{progressPct}% of manual effort automated</span>
             <span>
-              {completedIds.size} / {REVIEW_ITEMS.length} items reviewed
+              {completedIds.size} / {items.length} items reviewed
             </span>
           </div>
         </div>
@@ -132,7 +194,7 @@ export default function TimeSavingsPage() {
         </h2>
 
         <div className="space-y-2">
-          {REVIEW_ITEMS.map((item) => {
+          {items.map((item) => {
             const done = completedIds.has(item.id);
             const pillClass = CATEGORY_STYLES[item.category];
             return (

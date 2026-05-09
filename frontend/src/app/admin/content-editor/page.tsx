@@ -196,7 +196,7 @@ function TextbookEditor() {
                 {chapter.title}
               </span>
               {isError && (
-                <span className="text-xs text-red-400 shrink-0">generation error</span>
+                <span className="w-2 h-2 rounded-full bg-red-500 shrink-0" title="Generation error — expand to regenerate" />
               )}
               {dirty && !isError && (
                 <span className="w-2 h-2 rounded-full bg-[#C9A84C] shrink-0" title="Unsaved changes" />
