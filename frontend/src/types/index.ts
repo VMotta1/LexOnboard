@@ -14,6 +14,7 @@ export interface DocumentListItem {
   doc_type: string;
   status: string;
   upload_date: string;
+  page_count?: number | null;
 }
 
 export interface PipelineStatus {
